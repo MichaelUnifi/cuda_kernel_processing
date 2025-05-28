@@ -237,17 +237,6 @@ int main() {
         delete[] output;
     }
 
-
-    {
-
-        for (int rep = 0; rep < repetitions; rep++) {
-            for (size_t i = 0; i < numImages; i++) {
-
-            }
-        }
-
-    }
-
     saveMapToJSON(kernelTimes, "sequential_results.json");
 
     for (size_t i = 0; i < numImages; i++) {
