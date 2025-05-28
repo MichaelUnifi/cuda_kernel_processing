@@ -180,12 +180,12 @@ int main() {
 
     auto separableKernels = new float*[numImages];
     auto nonSeparableKernels = new float*[numImages];
-    separableKernels[0] = gaussian1D(kernelRadii[0], (float(kernelWidths[0] -1))/6); // 3x3 Gaussian kernel
-    separableKernels[1] = gaussian1D(kernelRadii[1], (float(kernelWidths[1] -1))/6); // 9x9 Gaussian kernel
-    separableKernels[2] = gaussian1D(kernelRadii[2], (float(kernelWidths[2] -1))/6); // 15x15 Gaussian kernel
-    nonSeparableKernels[0] = logKernel(kernelRadii[0], (float(kernelWidths[0] -1))/6); // 3x3 Laplacian of Gaussian kernel
-    nonSeparableKernels[1] = logKernel(kernelRadii[1], (float(kernelWidths[1] -1))/6); // 9x9 Laplacian of Gaussian kernel
-    nonSeparableKernels[2] = logKernel(kernelRadii[2], (float(kernelWidths[2] -1))/6); // 15x15 Laplacian of Gaussian kernel
+    separableKernels[0] = gaussian1D(kernelRadii[0], (double(kernelWidths[0] -1))/6); // 3x3 Gaussian kernel
+    separableKernels[1] = gaussian1D(kernelRadii[1], (double(kernelWidths[1] -1))/6); // 9x9 Gaussian kernel
+    separableKernels[2] = gaussian1D(kernelRadii[2], (double(kernelWidths[2] -1))/6); // 15x15 Gaussian kernel
+    nonSeparableKernels[0] = logKernel(kernelRadii[0], (double(kernelWidths[0] -1))/6); // 3x3 Laplacian of Gaussian kernel
+    nonSeparableKernels[1] = logKernel(kernelRadii[1], (double(kernelWidths[1] -1))/6); // 9x9 Laplacian of Gaussian kernel
+    nonSeparableKernels[2] = logKernel(kernelRadii[2], (double(kernelWidths[2] -1))/6); // 15x15 Laplacian of Gaussian kernel
 
 
 
@@ -196,44 +196,47 @@ int main() {
         fs::create_directory(outDir);
     }
 
-    std::chrono::duration<double> totalTime(0);
-
     for (size_t i = 0; i < numImages; i++) {
         int w = widths[i];
         int h = heights[i];
         unsigned char* output = new unsigned char[w * h]();
-        for (int rep = 0; rep < repetitions; rep++) {
-            auto start = std::chrono::high_resolution_clock::now();
-            separableConvolution(images[i], output, w, h, separableKernels[i], kernelRadii[i]);
-            auto end = std::chrono::high_resolution_clock::now();
-            totalTime += (end - start);
-            if (rep == 0) {
-                std::string outFilename = outDir + "/separable_kernel_" + std::to_string(i) + ".png";
-                if (saveImage(outFilename, output, w, h, 1))
-                    std::cout << "Saved output image: " << outFilename << std::endl;
+        std::chrono::duration<double> totalTime(0);
+        for (int j = 0; j < numKernels; j++) {
+            for (int rep = 0; rep < repetitions; rep++) {
+                auto start = std::chrono::high_resolution_clock::now();
+                separableConvolution(images[i], output, w, h, separableKernels[j], kernelRadii[j]);
+                auto end = std::chrono::high_resolution_clock::now();
+                std::cout<<"Separable kernel: " << kernelWidths[j] << "x" << kernelWidths[j] << " applied to image: " << resDict[i] << std::endl;
+                totalTime += (end - start);
+                if (rep == 0 && j == i) {
+                    std::string outFilename = outDir + "/separable_kernel_" + std::to_string(i) + ".png";
+                    if (saveImage(outFilename, output, w, h, 1))
+                        std::cout << "Saved output image: " << outFilename << std::endl;
+                }
+
             }
+            double avgTime = totalTime.count() / (repetitions);
+            kernelTimes[6*i + j] = std::chrono::duration<double>(avgTime);
+            std::cout << "Separable " << kernelWidths[j] << "x" << kernelWidths[j] <<" Kernel average processing time - " << resDict[i] << ": " << avgTime << " seconds." << std::endl;
 
-        }
-        double avgTime = totalTime.count() / (repetitions);
-        kernelTimes[2*i] = std::chrono::duration<double>(avgTime);
-        std::cout << "Separable Kernel average processing time - " << resDict[i] << ": " << avgTime << " seconds." << std::endl;
+            for (int rep = 0; rep < repetitions; rep++) {
+                totalTime = std::chrono::duration<double>(0);
+                auto start = std::chrono::high_resolution_clock::now();
+                nonSeparableConvolution(images[i], output, w, h, nonSeparableKernels[j], kernelWidths[j]);
+                auto end = std::chrono::high_resolution_clock::now();
+                std::cout<<"Non-separable kernel: " << kernelWidths[j] << "x" << kernelWidths[j] << " applied to image: " << resDict[i] << std::endl;
+                totalTime += (end - start);
+                if (rep == 0 && j == i) {
+                    std::string outFilename = outDir + "/non_separable_kernel_" + std::to_string(i) + ".png";
+                    if (saveImage(outFilename, output, w, h, 1))
+                        std::cout << "Saved output image: " << outFilename << std::endl;
+                }
 
-        for (int rep = 0; rep < repetitions; rep++) {
-            totalTime = std::chrono::duration<double>(0);
-            auto start = std::chrono::high_resolution_clock::now();
-            nonSeparableConvolution(images[i], output, w, h, nonSeparableKernels[i], kernelWidths[i]);
-            auto end = std::chrono::high_resolution_clock::now();
-            totalTime += (end - start);
-            if (rep == 0) {
-                std::string outFilename = outDir + "/non_separable_kernel_" + std::to_string(i) + ".png";
-                if (saveImage(outFilename, output, w, h, 1))
-                    std::cout << "Saved output image: " << outFilename << std::endl;
             }
-
+            avgTime = totalTime.count() / (repetitions);
+            kernelTimes[6*i + j + numKernels] = std::chrono::duration<double>(avgTime);
+            std::cout << "Non-separable " << kernelWidths[j] << "x" << kernelWidths[j] <<" Kernel average processing time -  " << resDict[i] << ": " << avgTime << " seconds." << std::endl;
         }
-        avgTime = totalTime.count() / (repetitions);
-        kernelTimes[2*i + 1] = std::chrono::duration<double>(avgTime);
-        std::cout << "Non-separable Kernel average processing time -  " << resDict[i] << ": " << avgTime << " seconds." << std::endl;
         delete[] output;
     }
 
