@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <filesystem>  // C++17 filesystem library
 #include <vector>
+#include <cmath>
+#include <numeric>
 namespace fs = std::filesystem;
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -39,7 +41,6 @@ bool loadImage(const std::string &filename, unsigned char* &image, int &width, i
         std::cerr << "Error loading image: " << filename << std::endl;
         return false;
     }
-    channels = 1; // Force single channel
     image = new unsigned char[width * height];
     std::copy(data, data + (width * height), image);
     stbi_image_free(data);
@@ -52,6 +53,52 @@ bool saveImage(const std::string &filename, const unsigned char* image, int widt
         return false;
     }
     return true;
+}
+
+// Generate a 1D Gaussian kernel of radius `r` and standard deviation `sigma`.
+// Returns a pointer to a new float array of size (2*r+1). Caller must delete[].
+float* gaussian1D(int r, double sigma) {
+    int size = 2 * r + 1;
+    float* g = new float[size];
+    double sum = 0.0;
+    double denom = 2.0 * sigma * sigma;
+    for (int i = -r; i <= r; ++i) {
+        double v = std::exp(- (i * i) / denom);
+        g[i + r] = static_cast<float>(v);
+        sum += v;
+    }
+    // normalize
+    for (int i = 0; i < size; ++i) g[i] /= static_cast<float>(sum);
+    return g;
+}
+
+// Generate a 2D Laplacian-of-Gaussian kernel of radius `r` and sigma `sigma`.
+// Returns a pointer to a new float array of size (2*r+1)*(2*r+1), row-major. Caller must delete[].
+float* logKernel(int r, double sigma) {
+    int size = 2 * r + 1;
+    float* k = new float[size * size];
+    double denom1 = sigma * sigma;
+    double denom2 = denom1 * denom1;
+    double two_den2 = 2.0 * denom1;
+    double sum = 0.0;
+
+    // raw LoG
+    for (int y = -r; y <= r; ++y) {
+        for (int x = -r; x <= r; ++x) {
+            double rsq = double(x * x + y * y);
+            double norm = (rsq - two_den2) / denom2;
+            double val = norm * std::exp(-rsq / two_den2);
+            k[(y + r) * size + (x + r)] = static_cast<float>(val);
+            sum += val;
+        }
+    }
+    // subtract mean so sum = 0
+    double mean = sum / (size * size);
+    for (int j = 0; j < size; ++j)
+        for (int i = 0; i < size; ++i)
+            k[j * size + i] -= static_cast<float>(mean);
+
+    return k;
 }
 
 // Separable convolution
@@ -109,54 +156,40 @@ void nonSeparableConvolution(const unsigned char* input, unsigned char* output,
 }
 
 int main() {
+    std::unordered_map<int, std::string> resDict = {
+        {0, "low resolution"},
+        {1, "medium resolution"},
+        {2, "high resolution"}
+    };
 
-    std::string dataDir = "data";
-    std::vector<std::string> imagePaths;
-    for (const auto& entry : fs::directory_iterator(dataDir)) {
-        if (entry.is_regular_file()) {
-            imagePaths.push_back(entry.path().string());
-        }
-    }
-    std::sort(imagePaths.begin(), imagePaths.end());
-    if (imagePaths.empty()) {
-        std::cerr << "No images found in directory: " << dataDir << std::endl;
-        return -1;
-    }
+    std::string dataDir = "data/";
 
-
-    size_t numImages = imagePaths.size();
+    size_t numImages = 3;
     unsigned char** images = new unsigned char*[numImages];
     int* widths = new int[numImages];
     int* heights = new int[numImages];
     int* channelsList = new int[numImages];
 
-    for (size_t i = 0; i < numImages; i++) {
-        if (loadImage(imagePaths[i], images[i], widths[i], heights[i], channelsList[i])) {
-            std::cout << "Loaded image: " << imagePaths[i] << " ("
-                      << widths[i] << "x" << heights[i] << ", " << channelsList[i] << " channels)" << std::endl;
-        }
-    }
 
-    // One separable kernel (9-element 1D kernel)
-    float separableKernel[9] = {0.0270f, 0.0650f, 0.1200f, 0.1750f, 0.2000f, 0.1750f, 0.1200f, 0.0650f, 0.0270f};
+    loadImage(dataDir + "low.jpeg", images[0], widths[0], heights[0], channelsList[0]);
+    loadImage(dataDir + "medium.png", images[1], widths[1], heights[1], channelsList[1]);
+    loadImage(dataDir + "high.png", images[2], widths[2], heights[2], channelsList[2]);
+    int numKernels = 3;
+    int kernelRadii[numImages] = {1, 4, 7}; // Radii for the Gaussian kernel
+    int kernelWidths[numImages] = {3, 9, 15}; // Widths for the Laplacian of Gaussian kernel
 
-    // One non-separable kernel (9x9)
-    float nonSeparableKernel[9][9] = {
-        {  0,   0, -1, -1, -2, -1, -1,  0,  0},
-        {  0,  -1, -3, -3, -5, -3, -3, -1,  0},
-        { -1,  -3, -5, -5, -7, -5, -5, -3, -1},
-        { -1,  -3, -5,  0,  0,  0, -5, -3, -1},
-        { -2,  -5, -7,  0, 176,  0, -7, -5, -2},
-        { -1,  -3, -5,  0,  0,  0, -5, -3, -1},
-        { -1,  -3, -5, -5, -7, -5, -5, -3, -1},
-        {  0,  -1, -3, -3, -5, -3, -3, -1,  0},
-        {  0,   0, -1, -1, -2, -1, -1,  0,  0}
-    };
+    auto separableKernels = new float*[numImages];
+    auto nonSeparableKernels = new float*[numImages];
+    separableKernels[0] = gaussian1D(kernelRadii[0], (float(kernelWidths[0] -1))/6); // 3x3 Gaussian kernel
+    separableKernels[1] = gaussian1D(kernelRadii[1], (float(kernelWidths[1] -1))/6); // 9x9 Gaussian kernel
+    separableKernels[2] = gaussian1D(kernelRadii[2], (float(kernelWidths[2] -1))/6); // 15x15 Gaussian kernel
+    nonSeparableKernels[0] = logKernel(kernelRadii[0], (float(kernelWidths[0] -1))/6); // 3x3 Laplacian of Gaussian kernel
+    nonSeparableKernels[1] = logKernel(kernelRadii[1], (float(kernelWidths[1] -1))/6); // 9x9 Laplacian of Gaussian kernel
+    nonSeparableKernels[2] = logKernel(kernelRadii[2], (float(kernelWidths[2] -1))/6); // 15x15 Laplacian of Gaussian kernel
 
-    int kernelRadius = 4; // Since it's a 9x9 kernel, the radius is 4
-    int kernelWidth = 9;
 
-    const int repetitions = 10;
+
+    const int repetitions = 1; //TODO set to 100 for performance testing
     std::unordered_map<int, std::chrono::duration<double>> kernelTimes;
     std::string outDir = "output";
     if (!fs::exists(outDir)) {
@@ -164,50 +197,55 @@ int main() {
     }
 
     std::chrono::duration<double> totalTime(0);
-    for (int rep = 0; rep < repetitions; rep++) {
-        for (size_t i = 0; i < numImages; i++) {
-            int w = widths[i];
-            int h = heights[i];
-            int c = channelsList[i];
-            unsigned char* output = new unsigned char[w * h * c]();
+
+    for (size_t i = 0; i < numImages; i++) {
+        int w = widths[i];
+        int h = heights[i];
+        unsigned char* output = new unsigned char[w * h]();
+        for (int rep = 0; rep < repetitions; rep++) {
             auto start = std::chrono::high_resolution_clock::now();
-            separableConvolution(images[i], output, w, h, separableKernel, kernelRadius);
+            separableConvolution(images[i], output, w, h, separableKernels[i], kernelRadii[i]);
             auto end = std::chrono::high_resolution_clock::now();
             totalTime += (end - start);
-            if (rep == 0 && i == 0) {
+            if (rep == 0) {
                 std::string outFilename = outDir + "/separable_kernel_" + std::to_string(i) + ".png";
                 if (saveImage(outFilename, output, w, h, 1))
                     std::cout << "Saved output image: " << outFilename << std::endl;
             }
-            delete[] output;
-        }
-    }
-    double avgTime = totalTime.count() / (repetitions);
-    kernelTimes[0] = std::chrono::duration<double>(avgTime);
-    std::cout << "Separable Kernel average processing time: " << avgTime << " seconds." << std::endl;
 
-    {
-        std::chrono::duration<double> totalTime(0);
+        }
+        double avgTime = totalTime.count() / (repetitions);
+        kernelTimes[2*i] = std::chrono::duration<double>(avgTime);
+        std::cout << "Separable Kernel average processing time - " << resDict[i] << ": " << avgTime << " seconds." << std::endl;
+
         for (int rep = 0; rep < repetitions; rep++) {
-            for (size_t i = 0; i < numImages; i++) {
-                int w = widths[i];
-                int h = heights[i];
-                unsigned char* output = new unsigned char[w * h]();
-                auto start = std::chrono::high_resolution_clock::now();
-                nonSeparableConvolution(images[i], output, w, h, &nonSeparableKernel[0][0], kernelWidth);
-                auto end = std::chrono::high_resolution_clock::now();
-                totalTime += (end - start);
-                if (rep == 0 && i == 0) {
-                    std::string outFilename = outDir + "/non_separable_kernel_" + std::to_string(i) + ".png";
-                    if (saveImage(outFilename, output, w, h, 1))
-                        std::cout << "Saved output image: " << outFilename << std::endl;
-                }
-                delete[] output;
+            totalTime = std::chrono::duration<double>(0);
+            auto start = std::chrono::high_resolution_clock::now();
+            nonSeparableConvolution(images[i], output, w, h, nonSeparableKernels[i], kernelWidths[i]);
+            auto end = std::chrono::high_resolution_clock::now();
+            totalTime += (end - start);
+            if (rep == 0) {
+                std::string outFilename = outDir + "/non_separable_kernel_" + std::to_string(i) + ".png";
+                if (saveImage(outFilename, output, w, h, 1))
+                    std::cout << "Saved output image: " << outFilename << std::endl;
             }
+
         }
         avgTime = totalTime.count() / (repetitions);
-        kernelTimes[2] = std::chrono::duration<double>(avgTime);
-        std::cout << "Non-separable Kernel average processing time: " << avgTime << " seconds." << std::endl;
+        kernelTimes[2*i + 1] = std::chrono::duration<double>(avgTime);
+        std::cout << "Non-separable Kernel average processing time -  " << resDict[i] << ": " << avgTime << " seconds." << std::endl;
+        delete[] output;
+    }
+
+
+    {
+
+        for (int rep = 0; rep < repetitions; rep++) {
+            for (size_t i = 0; i < numImages; i++) {
+
+            }
+        }
+
     }
 
     saveMapToJSON(kernelTimes, "sequential_results.json");
@@ -219,6 +257,8 @@ int main() {
     delete[] widths;
     delete[] heights;
     delete[] channelsList;
+    delete[] separableKernels;
+    delete[] nonSeparableKernels;
 
     return 0;
 }

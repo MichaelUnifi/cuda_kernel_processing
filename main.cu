@@ -170,7 +170,6 @@ bool loadImage(const std::string &filename, std::vector<unsigned char> &image,
         std::cerr << "Error loading image: " << filename << std::endl;
         return false;
     }
-    channels = 1;
     image.assign(data, data + width * height * channels);
     stbi_image_free(data);
     return true;
