@@ -174,20 +174,27 @@ int main() {
     loadImage(dataDir + "low.jpeg", images[0], widths[0], heights[0], channelsList[0]);
     loadImage(dataDir + "medium.png", images[1], widths[1], heights[1], channelsList[1]);
     loadImage(dataDir + "high.png", images[2], widths[2], heights[2], channelsList[2]);
-    int numKernels = 3;
-    int kernelRadii[numImages] = {1, 4, 7}; // Radii for the Gaussian kernel
-    int kernelWidths[numImages] = {3, 9, 15}; // Widths for the Laplacian of Gaussian kernel
+    std::cout << "Loaded images:" << std::endl;
+    for (size_t i = 0; i < numImages; i++) {
+        std::cout << "Image " << i << ": " << resDict[i] << " (" << widths[i] << "x" << heights[i] << ")" << std::endl;
+    }
 
-    auto separableKernels = new float*[numImages];
-    auto nonSeparableKernels = new float*[numImages];
-    separableKernels[0] = gaussian1D(kernelRadii[0], (double(kernelWidths[0] -1))/6); // 3x3 Gaussian kernel
-    separableKernels[1] = gaussian1D(kernelRadii[1], (double(kernelWidths[1] -1))/6); // 9x9 Gaussian kernel
-    separableKernels[2] = gaussian1D(kernelRadii[2], (double(kernelWidths[2] -1))/6); // 15x15 Gaussian kernel
-    nonSeparableKernels[0] = logKernel(kernelRadii[0], (double(kernelWidths[0] -1))/6); // 3x3 Laplacian of Gaussian kernel
-    nonSeparableKernels[1] = logKernel(kernelRadii[1], (double(kernelWidths[1] -1))/6); // 9x9 Laplacian of Gaussian kernel
-    nonSeparableKernels[2] = logKernel(kernelRadii[2], (double(kernelWidths[2] -1))/6); // 15x15 Laplacian of Gaussian kernel
+    int numSizes = 7;
+    int numKernels = 2 * numSizes;
 
+    auto separableKernels = new float*[numSizes];
+    auto nonSeparableKernels = new float*[numSizes];
+    int kernelRadii[numSizes]; // Radii for the Gaussian kernel
+    int kernelWidths[numSizes]; // Widths for the Laplacian of Gaussian kernel
 
+    // Define kernels from radius 1 to 7, step of 1 (7 kernels total)
+    // For each radius, we will create a Gaussian kernel and a Laplacian of Gaussian kernel
+    for (int i = 0; i < numSizes; i++) {
+        kernelRadii[i] = i + 1;
+        kernelWidths[i] = 2 * kernelRadii[i] + 1;
+        separableKernels[i] = gaussian1D(kernelRadii[i], static_cast<double>(kernelWidths[i] - 1) / 6); // 3x3, 5x5, ..., 13x13 Gaussian kernels
+        nonSeparableKernels[i] = logKernel(kernelRadii[i], static_cast<double>(kernelWidths[i] - 1) / 6); // 3x3, 5x5, ..., 13x13 Laplacian of Gaussian kernels
+    }
 
     const int repetitions = 1; //TODO set to 100 for performance testing
     std::unordered_map<int, std::chrono::duration<double>> kernelTimes;
@@ -201,14 +208,13 @@ int main() {
         int h = heights[i];
         unsigned char* output = new unsigned char[w * h]();
         std::chrono::duration<double> totalTime(0);
-        for (int j = 0; j < numKernels; j++) {
+        for (int j = 0; j < numSizes; j++) {
             for (int rep = 0; rep < repetitions; rep++) {
                 auto start = std::chrono::high_resolution_clock::now();
                 separableConvolution(images[i], output, w, h, separableKernels[j], kernelRadii[j]);
                 auto end = std::chrono::high_resolution_clock::now();
-                std::cout<<"Separable kernel: " << kernelWidths[j] << "x" << kernelWidths[j] << " applied to image: " << resDict[i] << std::endl;
                 totalTime += (end - start);
-                if (rep == 0 && j == i) {
+                if (rep == 0 && j == 2 * i + 2) {
                     std::string outFilename = outDir + "/separable_kernel_" + std::to_string(i) + ".png";
                     if (saveImage(outFilename, output, w, h, 1))
                         std::cout << "Saved output image: " << outFilename << std::endl;
@@ -216,7 +222,7 @@ int main() {
 
             }
             double avgTime = totalTime.count() / (repetitions);
-            kernelTimes[6*i + j] = std::chrono::duration<double>(avgTime);
+            kernelTimes[numKernels * i + j] = std::chrono::duration<double>(avgTime);
             std::cout << "Separable " << kernelWidths[j] << "x" << kernelWidths[j] <<" Kernel average processing time - " << resDict[i] << ": " << avgTime << " seconds." << std::endl;
 
             for (int rep = 0; rep < repetitions; rep++) {
@@ -224,9 +230,8 @@ int main() {
                 auto start = std::chrono::high_resolution_clock::now();
                 nonSeparableConvolution(images[i], output, w, h, nonSeparableKernels[j], kernelWidths[j]);
                 auto end = std::chrono::high_resolution_clock::now();
-                std::cout<<"Non-separable kernel: " << kernelWidths[j] << "x" << kernelWidths[j] << " applied to image: " << resDict[i] << std::endl;
                 totalTime += (end - start);
-                if (rep == 0 && j == i) {
+                if (rep == 0 && j == 2 * i + 2) {
                     std::string outFilename = outDir + "/non_separable_kernel_" + std::to_string(i) + ".png";
                     if (saveImage(outFilename, output, w, h, 1))
                         std::cout << "Saved output image: " << outFilename << std::endl;
@@ -234,7 +239,7 @@ int main() {
 
             }
             avgTime = totalTime.count() / (repetitions);
-            kernelTimes[6*i + j + numKernels] = std::chrono::duration<double>(avgTime);
+            kernelTimes[numKernels * i + j + numSizes] = std::chrono::duration<double>(avgTime);
             std::cout << "Non-separable " << kernelWidths[j] << "x" << kernelWidths[j] <<" Kernel average processing time -  " << resDict[i] << ": " << avgTime << " seconds." << std::endl;
         }
         delete[] output;
