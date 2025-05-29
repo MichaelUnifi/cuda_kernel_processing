@@ -196,7 +196,7 @@ int main() {
         nonSeparableKernels[i] = logKernel(kernelRadii[i], static_cast<double>(kernelWidths[i] - 1) / 6); // 3x3, 5x5, ..., 13x13 Laplacian of Gaussian kernels
     }
 
-    const int repetitions = 1; //TODO set to 100 for performance testing
+    const int repetitions = 10; //TODO set to 100 for performance testing
     std::unordered_map<int, std::chrono::duration<double>> kernelTimes;
     std::string outDir = "output";
     if (!fs::exists(outDir)) {
@@ -207,8 +207,8 @@ int main() {
         int w = widths[i];
         int h = heights[i];
         unsigned char* output = new unsigned char[w * h]();
-        std::chrono::duration<double> totalTime(0);
         for (int j = 0; j < numSizes; j++) {
+            std::chrono::duration<double> totalTime(0);
             for (int rep = 0; rep < repetitions; rep++) {
                 auto start = std::chrono::high_resolution_clock::now();
                 separableConvolution(images[i], output, w, h, separableKernels[j], kernelRadii[j]);
@@ -224,9 +224,8 @@ int main() {
             double avgTime = totalTime.count() / (repetitions);
             kernelTimes[numKernels * i + j] = std::chrono::duration<double>(avgTime);
             std::cout << "Separable " << kernelWidths[j] << "x" << kernelWidths[j] <<" Kernel average processing time - " << resDict[i] << ": " << avgTime << " seconds." << std::endl;
-
+            totalTime = std::chrono::duration<double>(0);
             for (int rep = 0; rep < repetitions; rep++) {
-                totalTime = std::chrono::duration<double>(0);
                 auto start = std::chrono::high_resolution_clock::now();
                 nonSeparableConvolution(images[i], output, w, h, nonSeparableKernels[j], kernelWidths[j]);
                 auto end = std::chrono::high_resolution_clock::now();
