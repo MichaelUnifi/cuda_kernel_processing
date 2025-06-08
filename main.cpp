@@ -4,7 +4,7 @@
 #include <chrono>
 #include <unordered_map>
 #include <algorithm>
-#include <filesystem>  // C++17 filesystem library
+#include <filesystem>
 #include <vector>
 #include <cmath>
 #include <numeric>
@@ -170,7 +170,6 @@ int main() {
     int* heights = new int[numImages];
     int* channelsList = new int[numImages];
 
-
     loadImage(dataDir + "low.jpeg", images[0], widths[0], heights[0], channelsList[0]);
     loadImage(dataDir + "medium.png", images[1], widths[1], heights[1], channelsList[1]);
     loadImage(dataDir + "high.png", images[2], widths[2], heights[2], channelsList[2]);
@@ -196,7 +195,7 @@ int main() {
         nonSeparableKernels[i] = logKernel(kernelRadii[i], static_cast<double>(kernelWidths[i] - 1) / 6); // 3x3, 5x5, ..., 13x13 Laplacian of Gaussian kernels
     }
 
-    const int repetitions = 10; //TODO set to 100 for performance testing
+    const int repetitions = 100;
     std::unordered_map<int, std::chrono::duration<double>> kernelTimes;
     std::string outDir = "output";
     if (!fs::exists(outDir)) {
@@ -244,7 +243,7 @@ int main() {
         delete[] output;
     }
 
-    saveMapToJSON(kernelTimes, "sequential_results.json");
+    saveMapToJSON(kernelTimes, "cuda_sequential_results.json");
 
     for (size_t i = 0; i < numImages; i++) {
         delete[] images[i];
