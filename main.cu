@@ -120,10 +120,7 @@ __global__ void separableConvolutionKernelConstant(const unsigned char* input, u
             int tempIndex = globalY * width + x;
             sum += cKernel[ky + kernelRadius] * temp[tempIndex];
         }
-        int val = static_cast<int>(sum);
-        if(val < 0) val = 0;
-        if(val > 255) val = 255;
-        output[index] = static_cast<unsigned char>(val);
+        output[index] = static_cast<unsigned char>(clamp_int(static_cast<int>(sum), 0, 255));
     }
 }
 
@@ -198,7 +195,6 @@ __global__ void separableConvolutionKernelConstAndShared(const unsigned char* in
         }
     }
     __syncthreads();
-
     int localX = tx % blockWidth;
     int localY = tx / blockWidth;
     int globalX = tileOriginX + localX;
@@ -210,10 +206,7 @@ __global__ void separableConvolutionKernelConstAndShared(const unsigned char* in
             int tempIndex = (localY + kernelRadius + ky) * blockWidth + localX;
             sum += cKernel[ky + kernelRadius] * tempBuffer[tempIndex];
         }
-        int val = static_cast<int>(sum);
-        if(val < 0) val = 0;
-        if(val > 255) val = 255;
-        output[globalY * width + globalX] = static_cast<unsigned char>(val);
+        output[globalY * width + globalX] = static_cast<unsigned char>(clamp_int(static_cast<int>(sum), 0, 255));
     }
 }
 
@@ -266,10 +259,7 @@ __global__ void nonSeparableConvolutionKernelConstAndShared(const unsigned char*
                        float(tileBuffer[sharedTileIndex]);
             }
         }
-        int val = static_cast<int>(sum);
-        if(val < 0) val = 0;
-        if(val > 255) val = 255;
-        output[globalY * width + globalX] = static_cast<unsigned char>(val);
+        output[globalY * width + globalX] = static_cast<unsigned char>(clamp_int(static_cast<int>(sum), 0, 255));
     }
 }
 
@@ -301,7 +291,6 @@ bool saveImage(const std::string &filename, const std::vector<unsigned char> &im
 }
 
 // Generate a 1D Gaussian kernel of radius `r` and standard deviation `sigma`.
-// Returns a pointer to a new float array of size (2*r+1). Caller must delete[].
 float* gaussian1D(int r, double sigma) {
     int size = 2 * r + 1;
     float* g = new float[size];
@@ -318,7 +307,6 @@ float* gaussian1D(int r, double sigma) {
 }
 
 // Generate a 2D Laplacian-of-Gaussian kernel of radius `r` and sigma `sigma`.
-// Returns a pointer to a new float array of size (2*r+1)*(2*r+1), row-major. Caller must delete[].
 float* logKernel(int r, double sigma) {
     int size = 2 * r + 1;
     float* k = new float[size * size];
@@ -441,6 +429,7 @@ int main() {
                 int sharedTileWidth = blockWidth + 2 * kernelRadii[j];
                 int sharedTileSize = sharedTileHeight * sharedTileWidth;
                 int offset = sharedTileSize % sizeof(float);
+                offset = (offset == 0) ? 0 : sizeof(float) - offset; // Ensure shared memory is aligned to float size
                 int sharedTempSize = sharedTileHeight * blockWidth;
                 int enlargementFromTile = std::ceil(float(sharedTileSize) / float(blockSize));
                 int enlargementFromTemp = std::ceil(float(sharedTempSize) / float(blockSize));
@@ -581,8 +570,8 @@ int main() {
 
                     cudaCheckError( cudaEventRecord(start) );
 
-                    nonSeparableConvolutionKernelConstAndShared<<<blocksPerGrid, threadsPerBlock, sharedTileSize * sizeof(unsigned char)>>>(d_input, d_output,
-                        width, height, kernelRadii[j], blockWidth, blockHeight, sharedTileWidth, sharedTileHeight, enlargementFromTile);
+                    nonSeparableConvolutionKernelConstant<<<blocksPerGrid, threadsPerBlock>>>(d_input, d_output,
+                        width, height, kernelRadii[j], kernelWidths[j]);
                     cudaCheckError( cudaGetLastError() );
 
                     cudaCheckError( cudaEventRecord(stop) );
